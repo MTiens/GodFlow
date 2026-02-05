@@ -1,0 +1,35 @@
+# Host Header Injection Payloads
+# Common host header injection payloads for testing
+
+evil.com
+127.0.0.1
+localhost
+internal.example.com
+attacker.com
+example.com
+hostheader.attack
+0.0.0.0
+malicious.com
+admin.local
+google.com
+bing.com
+yahoo.com
+amazon.com
+facebook.com
+internal.company.com
+dev.company.com
+staging.company.com
+prod.company.com
+api.company.com
+admin.company.com
+test.company.com
+localhost:8080
+127.0.0.1:8080
+localhost:3000
+127.0.0.1:3000
+localhost:5000
+127.0.0.1:5000
+localhost:80
+127.0.0.1:80
+localhost:443
+127.0.0.1:443 

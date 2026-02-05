@@ -1,0 +1,6 @@
+# Cluster Bomb Set 1 - Authentication/User related payloads
+admin
+user
+test
+guest
+root 

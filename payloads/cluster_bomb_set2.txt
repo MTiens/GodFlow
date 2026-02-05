@@ -1,0 +1,6 @@
+# Cluster Bomb Set 2 - Credential/Secret related payloads
+password
+secret
+token
+key
+auth 

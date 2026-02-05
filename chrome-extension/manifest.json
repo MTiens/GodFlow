@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "AuPen Request Capture",
+  "version": "1.0.0",
+  "description": "Capture HTTP requests from web applications for AuPen security testing",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AuPen Request Capture"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
