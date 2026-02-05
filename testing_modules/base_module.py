@@ -19,6 +19,75 @@ class FuzzingResult(NamedTuple):
     anomaly_details: Optional[List[Dict[str, Any]]] = None  # Detailed anomaly information
     x_trace_id: str = ""  # X-Trace-Id header value for tracking requests
 
+class FuzzingRunnerWrapper:
+    """
+    Wraps RequestRunner to enforce global/step-level delay and concurrency limits.
+    """
+    def __init__(self, runner, delay_ms: int, concurrency: int, is_async: bool):
+        self.runner = runner
+        self.delay_s = delay_ms / 1000.0
+        self.concurrency = concurrency
+        self.is_async = is_async
+        self._semaphore = None
+        
+        # Debug info
+        if self.delay_s > 0 or self.concurrency > 1:
+            from core.colors import colored_print, format_log_prefix
+            colored_print(format_log_prefix("CONFIG", f"Initialized runner wrapper: Delay={delay_ms}ms, Concurrency={concurrency}"), "debug")
+
+    @property
+    def semaphore(self):
+        if self._semaphore is None and self.is_async and self.concurrency > 0:
+            import asyncio
+            self._semaphore = asyncio.Semaphore(self.concurrency)
+        return self._semaphore
+
+    def run(self, *args, **kwargs):
+        """Synchronous run with delay."""
+        if self.delay_s > 0:
+            import time
+            time.sleep(self.delay_s)
+        return self.runner.run(*args, **kwargs)
+
+    async def arun(self, *args, **kwargs):
+        """Asynchronous run with delay and concurrency control."""
+        if self.delay_s > 0:
+            import asyncio
+            await asyncio.sleep(self.delay_s)
+        
+        # If underlying runner is async, use semaphore and await arun
+        if self.is_async:
+            if self.semaphore:
+                async with self.semaphore:
+                    return await self.runner.arun(*args, **kwargs)
+            else:
+                return await self.runner.arun(*args, **kwargs)
+        else:
+            # Underlying runner is sync, call run() synchronously
+            # This blocks the event loop, which is expected for sync mode
+            return self.runner.run(*args, **kwargs)
+            
+    # Proxy other methods
+    def prepare_request(self, *args, **kwargs):
+        return self.runner.prepare_request(*args, **kwargs)
+        
+    def close(self):
+        return self.runner.close()
+        
+    async def aclose(self):
+        return await self.runner.aclose()
+        
+    def load_request_from_file(self, *args, **kwargs):
+        return self.runner.load_request_from_file(*args, **kwargs)
+        
+    def __getattr__(self, name):
+        return getattr(self.runner, name)
+    
+    def set_baseline_context(self, baseline_manager, baseline_collection):
+        """Set baseline context for enhanced vulnerability detection."""
+        self.baseline_manager = baseline_manager
+        self.baseline_collection = baseline_collection
+
 class FuzzingModule(ABC):
     """Abstract Base Class for all fuzzing/testing modules."""
     
@@ -29,15 +98,28 @@ class FuzzingModule(ABC):
         self.runner = runner
         self.state_manager = state_manager
         self.payload_manager = payload_manager
+        self.payload_manager = payload_manager
+        
+        # --- Wrapper Implementation for Global Control ---
+        # Determine settings: Step Config -> Kwargs -> Global Config
+        import config
+        
+        # Delay (ms)
+        step_delay = kwargs.get('delay', config.FUZZ_DELAY)
+        self.delay_ms = int(step_delay) if step_delay is not None else 0
+        
+        # Concurrency
+        step_concurrency = kwargs.get('concurrency', config.FUZZ_CONCURRENCY)
+        self.concurrency = int(step_concurrency) if step_concurrency is not None else 1
+        
+        # Wrap the runner to enforce these settings
+        self.runner = FuzzingRunnerWrapper(runner, self.delay_ms, self.concurrency, runner.is_async)
+        
         self.kwargs = kwargs
         self.baseline_manager = None  # Will be injected by orchestrator if available
         self.baseline_collection = None  # Will be loaded if baseline comparison is enabled
-    
-    def set_baseline_context(self, baseline_manager, baseline_collection):
-        """Set baseline context for enhanced vulnerability detection."""
-        self.baseline_manager = baseline_manager
-        self.baseline_collection = baseline_collection
-    
+
+
     def check_custom_matchers(self, response, matchers: List[Dict[str, Any]]) -> bool:
         """
         Check response against user-defined matchers from YAML configuration.

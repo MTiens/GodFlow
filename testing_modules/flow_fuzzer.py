@@ -59,9 +59,13 @@ class FlowFuzzerModule(FuzzingModule):
     def __init__(self, runner: RequestRunner, state_manager: StateManager, payload_manager: PayloadManager, **kwargs):
         super().__init__(runner, state_manager, payload_manager, **kwargs)
     
-    def run(self, parsed_request: dict, step_config: dict, **kwargs) -> List[FuzzingResult]:
+    async def run(self, parsed_request: dict, step_config: dict, **kwargs) -> List[FuzzingResult]:
+        """Legacy run support - delegates to Async."""
+        raise NotImplementedError("FlowFuzzer only supports async execution. Please use --async mode.")
+
+    async def arun(self, parsed_request: dict, step_config: dict, **kwargs) -> List[FuzzingResult]:
         """
-        Main execution method for flow fuzzing.
+        Main execution method for flow fuzzing (Async).
         
         Args:
             parsed_request: The parsed request for the current step
@@ -112,29 +116,34 @@ class FlowFuzzerModule(FuzzingModule):
         
         # Determine target parameters based on configuration
         if not target_params:
-            # Auto-detect target parameters from state
-            target_params = self._auto_detect_target_params()
+            return [FuzzingResult(
+                is_vulnerable=False,
+                description="Configuration error: 'target_params' is required for flow_fuzzer",
+                request=parsed_request,
+                response_status=0,
+                response_size=0
+            )]
         
         colored_print(f"  Flow Fuzzer targeting parameters: {target_params}", "info")
         colored_print(f"  Strategy: {strategy}, Payloads: {len(payloads)}", "info")
         
         if strategy == 'complete_flow':
-            results = self._complete_flow_fuzzing(
+            results = await self._complete_flow_fuzzing(
                 flow_steps, current_step_index, payloads, target_params, 
                 stop_on_failure, matchers=matchers, **kwargs
             )
         elif strategy == 'single_step':
-            results = self._single_step_fuzzing(
+            results = await self._single_step_fuzzing(
                 parsed_request, step_config, payloads, target_params, matchers=matchers, **kwargs
             )
         elif strategy == 'state_mutation':
-            results = self._state_mutation_fuzzing(
+            results = await self._state_mutation_fuzzing(
                 flow_steps, current_step_index, payloads, target_params,
                 stop_on_failure, matchers=matchers, **kwargs
             )
         elif strategy == 'batch_flow':
              batch_size = fuzz_config.get('batch_size', 5)
-             results = self._batch_flow_fuzzing(
+             results = await self._batch_flow_fuzzing(
                 flow_steps, current_step_index, payloads, target_params,
                 batch_size, stop_on_failure, matchers=matchers, **kwargs
             )
@@ -149,7 +158,7 @@ class FlowFuzzerModule(FuzzingModule):
         
         return results
     
-    def _complete_flow_fuzzing(self, flow_steps: List[dict], start_step: int, 
+    async def _complete_flow_fuzzing(self, flow_steps: List[dict], start_step: int, 
                               payloads: List[str], target_params: List[str],
                               stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
         """
@@ -159,7 +168,6 @@ class FlowFuzzerModule(FuzzingModule):
         
         for payload in payloads:
             for param_name in target_params:
-                # print(f"State: {self.state_manager._state}")
                 if param_name not in self.state_manager._state:
                     continue
                 
@@ -168,9 +176,9 @@ class FlowFuzzerModule(FuzzingModule):
                 # Create a fresh state with the payload substituted
                 fuzz_state = copy.deepcopy(self.state_manager)
                 fuzz_state.set(param_name, payload)
-                # print(f"Fuzz state: {fuzz_state._state}")
+                
                 # Run the complete flow from the beginning (step 0)
-                flow_results = self._run_complete_flow(
+                flow_results = await self._run_complete_flow(
                     fuzz_state, flow_steps, 0, payload, param_name,
                     stop_on_failure, **kwargs
                 )
@@ -178,7 +186,7 @@ class FlowFuzzerModule(FuzzingModule):
         
         return results
         
-    def _single_step_fuzzing(self, parsed_request: dict, step_config: dict,
+    async def _single_step_fuzzing(self, parsed_request: dict, step_config: dict,
                            payloads: List[str], target_params: List[str], **kwargs) -> List[FuzzingResult]:
         """
         Fuzzes only the current step with payloads.
@@ -204,7 +212,8 @@ class FlowFuzzerModule(FuzzingModule):
                 )
                 
                 try:
-                    response = self.runner.run(final_request)
+                    # Async execution via wrapper
+                    response = await self.runner.arun(final_request)
                     step_name = step_config.get('name', 'single_step_fuzz')
                     
                     # Enhanced vulnerability detection using baseline comparison
@@ -235,7 +244,7 @@ class FlowFuzzerModule(FuzzingModule):
         
         return results
     
-    def _state_mutation_fuzzing(self, flow_steps: List[dict], start_step: int,
+    async def _state_mutation_fuzzing(self, flow_steps: List[dict], start_step: int,
                               payloads: List[str], target_params: List[str],
                               stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
         """
@@ -252,30 +261,18 @@ class FlowFuzzerModule(FuzzingModule):
                     colored_print(format_log_prefix("INFO", f"Injecting '{payload[:30]}...' in '{param_name}' at step {injection_step}"), "info")
                     
                     # Run flow until injection point, then inject payload
-                    mutation_results = self._run_flow_with_mutation(
+                    mutation_results = await self._run_flow_with_mutation(
                         flow_steps, injection_step, param_name, payload, stop_on_failure, **kwargs
                     )
                     results.extend(mutation_results)
         
         return results
     
-    def _run_complete_flow(self, fuzz_state: StateManager, flow_steps: List[dict], 
+    async def _run_complete_flow(self, fuzz_state: StateManager, flow_steps: List[dict], 
                           start_step: int, payload: str, param_name: str,
                           stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
         """
         Runs a complete flow from the specified step onwards with a payload substituted.
-        
-        Args:
-            fuzz_state: StateManager with the payload substituted
-            flow_steps: List of flow step configurations
-            start_step: Index of the step to start from
-            payload: The payload being tested
-            param_name: The parameter name where the payload was substituted
-            stop_on_failure: Whether to stop the flow on any failure
-            **kwargs: Additional context including flow_context
-            
-        Returns:
-            List of FuzzingResult objects from the flow execution
         """
         results = []
         vulnerabilities_found = []
@@ -308,7 +305,6 @@ class FlowFuzzerModule(FuzzingModule):
                 step_name = step.get('name', f"Step {step_index}")
                 colored_print(format_log_prefix("INFO", f"Executing: {step_name}"), "info")
                 
-                # Load the request for this step using the runner's method
                 try:
                     parsed_request = self.runner.load_request_from_file(
                         step['request'], target, requests_dir
@@ -334,10 +330,10 @@ class FlowFuzzerModule(FuzzingModule):
                 )
                 
                 try:
-                    # Use the existing runner to execute the request
-                    response = self.runner.run(final_request)
+                    # Async execution via wrapper
+                    response = await self.runner.arun(final_request)
                     
-                    # Enhanced vulnerability detection using baseline comparison
+                    # Enhanced vulnerability detection
                     traditional_vulnerable = self._traditional_vulnerability_check(original_payload, response, kwargs.get('matchers'))
                     
                     result = self.create_enhanced_result(
@@ -350,7 +346,6 @@ class FlowFuzzerModule(FuzzingModule):
                         expected_vulnerable=True
                     )
                     
-                    # Check if vulnerability was detected (traditional or baseline)
                     if result.is_vulnerable:
                         vulnerability_info = {
                             'step_index': step_index,
@@ -363,7 +358,7 @@ class FlowFuzzerModule(FuzzingModule):
                         }
                         vulnerabilities_found.append(vulnerability_info)
                         
-                        # Add contextual information based on baseline analysis
+                        # Add contextual information
                         if result.baseline_comparison and result.baseline_comparison.get("baseline_available"):
                             anomalies = result.anomaly_details or []
                             anomaly_types = [a.get("type") for a in anomalies]
@@ -381,13 +376,10 @@ class FlowFuzzerModule(FuzzingModule):
                         
                         results.append(result)
                     
-                    # Extract and update state for next steps (this maintains flow state)
-                    # But preserve the fuzzing payload by restoring it after extraction
+                    # Extract and update state
                     fuzz_state.extract_and_update(response, step.get('extract', {}))
                     
-                    # Restore the fuzzing payload if it was overwritten during extraction
                     if param_name in fuzz_state._state:
-                        # Check if the value was changed during extraction
                         current_value = fuzz_state._state[param_name]
                         if current_value != original_payload:
                             colored_print(format_log_prefix("INFO", f"Restoring fuzzing payload '{original_payload[:50]}...' in '{param_name}' (was overwritten with '{str(current_value)[:50]}...')"), "info")
@@ -412,7 +404,7 @@ class FlowFuzzerModule(FuzzingModule):
                     else:
                         colored_print(format_log_prefix("ERROR", f"Non-required step '{step_name}' failed. Continuing flow."), "error")
             
-            # Summary of flow execution with enhanced information
+            # Summary
             if vulnerabilities_found:
                 colored_print(f"[!] Found {len(vulnerabilities_found)} vulnerabilities across the flow", "vulnerability")
                 for vuln in vulnerabilities_found:
@@ -437,24 +429,17 @@ class FlowFuzzerModule(FuzzingModule):
         
         return results
     
-    def _run_flow_with_mutation(self, flow_steps: List[dict], injection_step: int,
-                              param_name: str, payload: str, stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
+    async def _run_flow_with_mutation(self, flow_steps: List[dict], injection_step: int,
+                               param_name: str, payload: str, stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
         """
         Runs a flow and injects a payload at a specific step.
         """
         results = []
         
-        # This is a simplified implementation for mutation fuzzing
-        # In practice, you might want to run the flow up to the injection point,
-        # then inject the payload and continue
-        
         fuzz_state = copy.deepcopy(self.state_manager)
-        
-        # For now, just inject at the beginning and run the flow
         fuzz_state.set(param_name, payload)
         
-        # Run a subset of the flow
-        mutation_results = self._run_complete_flow(
+        mutation_results = await self._run_complete_flow(
             fuzz_state, flow_steps, injection_step, payload, param_name, stop_on_failure, **kwargs
         )
         
@@ -463,69 +448,30 @@ class FlowFuzzerModule(FuzzingModule):
     def _traditional_vulnerability_check(self, payload: str, response, matchers: List[Dict] = None) -> bool:
         """
         Vulnerability detection using custom matchers if provided, else fallback to hardcoded patterns.
-        
-        Args:
-            payload: The payload that was tested
-            response: The HTTP response object
-            matchers: Optional list of matcher configs from YAML
-            
-        Returns:
-            True if vulnerable, False otherwise
         """
-        # Use custom matchers if provided
         if matchers:
             return self.check_custom_matchers(response, matchers)
         
-        # Fallback: Check if payload is reflected
         reflected = payload in response.text
-        
-        # Fallback: Check for interesting status codes
         interesting_status = response.status_code >= 400
-        
-        # Fallback: Check for error patterns
         error_patterns = ['error', 'exception', 'stack trace', 'debug', 'sql', 'syntax']
         error_indicated = any(pattern in response.text.lower() for pattern in error_patterns)
         
         return reflected or interesting_status or error_indicated
     
-    def _auto_detect_target_params(self) -> List[str]:
-        """
-        Automatically detect parameters in the state that are good targets for fuzzing.
-        """
-        if not self.state_manager or not self.state_manager._state:
-            return []
-        
-        # Skip common authentication/session parameters
-        skip_params = {
-            'token', 'session', 'auth', 'authorization', 'jwt', 'cookie',
-            'username', 'password', 'email', 'user_id', 'session_id'
-        }
-        
-        target_params = []
-        for param_name, param_value in self.state_manager._state.items():
-            # Skip if it's in the skip list
-            if any(skip in param_name.lower() for skip in skip_params):
-                continue
-                
-            # Only include string parameters that might be injectable
-            if isinstance(param_value, str) and len(param_value) > 0:
-                target_params.append(param_name)
-        
-        return target_params[:5]  # Limit to first 5 to avoid too many combinations
+
     
-    def _batch_flow_fuzzing(self, flow_steps: List[dict], current_step_index: int,
+    async def _batch_flow_fuzzing(self, flow_steps: List[dict], current_step_index: int,
                           payloads: List[str], target_params: List[str],
                           batch_size: int, stop_on_failure: bool, **kwargs) -> List[FuzzingResult]:
         """
-        Runs payloads in batches. For each batch, it re-runs the previous steps (setup)
-        to get a fresh state (e.g., new OTP, new Transaction ID), then fuzzes the current step.
+        Runs payloads in batches (Async).
         """
         results = []
         flow_context = kwargs.get('flow_context', {})
         requests_dir = flow_context.get('requests_dir', 'requests')
         target = flow_context.get('target', None)
         
-        # Calculate number of batches
         total_batches = (len(payloads) + batch_size - 1) // batch_size
         
         colored_print(f"  Batch Flow Fuzzing: {len(payloads)} payloads in {total_batches} batches (size {batch_size})", "info")
@@ -534,15 +480,43 @@ class FlowFuzzerModule(FuzzingModule):
             batch_payloads = payloads[i:i + batch_size]
             colored_print(f"  Processing Batch {batch_idx + 1}/{total_batches} ({len(batch_payloads)} payloads)", "info")
             
-            # 1. Setup Phase: Run flow from start to just before current step
-            # Create a fresh state for this batch
+            # 1. Setup Phase
             batch_state = copy.deepcopy(self.state_manager)
             
-            # Execute steps 0 to current_step_index - 1
+            # Regenerate persona values for this batch (force fresh random values)
+            all_personas = flow_context.get('all_personas', {})
+            active_persona_name = flow_context.get('active_persona_name')
+            
+            if active_persona_name and active_persona_name in all_personas:
+                # colored_print(f"    [DEBUG] Regenerating persona '{active_persona_name}' for batch", "debug")
+                persona_data = all_personas[active_persona_name]
+                # Re-resolve the persona templates. This triggers {{util.random...}} again.
+                resolved_persona = substitute_all(persona_data, batch_state._state)
+                if isinstance(resolved_persona, dict):
+                    batch_state._state.update(resolved_persona)
+            
             setup_success = True
             if current_step_index > 0:
                 colored_print(f"    Running setup steps (0 to {current_step_index-1}) for batch...", "info")
-                setup_success = self._execute_clean_flow_steps(
+                
+                # Critical: Clear variables that are supposed to be re-generated by the setup steps.
+                # If we don't clear them, and the re-run fails or regex fails, we might silently use the stale values from the initial run.
+                # We identify which variables are extracted by the steps we are about to run.
+                vars_to_clear = set()
+                for step_idx in range(0, current_step_index):
+                    step = flow_steps[step_idx]
+                    if not step.get('enable', True):
+                        continue
+                    extract_rules = step.get('extract', {})
+                    vars_to_clear.update(extract_rules.keys())
+                
+                if vars_to_clear:
+                    # colored_print(f"    [DEBUG] Clearing stale state variables: {vars_to_clear}", "debug")
+                    for var in vars_to_clear:
+                        if var in batch_state._state:
+                            del batch_state._state[var]
+
+                setup_success = await self._execute_clean_flow_steps(
                     batch_state, flow_steps, 0, current_step_index, 
                     requests_dir, target
                 )
@@ -558,38 +532,32 @@ class FlowFuzzerModule(FuzzingModule):
                 ))
                 continue
             
-            # 2. Attack Phase: Fuzz the current step using the prepared batch_state
-            # We use the current step configuration
+            # 2. Attack Phase
             step_config = flow_steps[current_step_index]
             step_name = step_config.get('name', f"Step {current_step_index}")
             
             for payload in batch_payloads:
                 for param_name in target_params:
-                    # Note: We check if param exists in the BATCH state, which spans from the setup
                     if param_name not in batch_state._state:
                         continue
                         
                     colored_print(format_log_prefix("INFO", f"Testing payload '{payload[:30]}...' in '{param_name}'"), "info")
                     
-                    # Fork state for this specific payload test (don't corrupt the batch_state)
                     test_state = copy.deepcopy(batch_state)
                     test_state.set(param_name, payload)
                     
                     try:
-                        # Load request
                         parsed_request = self.runner.load_request_from_file(
                             step_config['request'], target, requests_dir
                         )
                         
-                        # Prepare request
                         final_request = self.runner.prepare_request(
                             parsed_request, test_state, step_config.get('set_headers', {})
                         )
                         
-                        # Execute
-                        response = self.runner.run(final_request)
+                        # Async execution
+                        response = await self.runner.arun(final_request)
                         
-                        # Check vulnerability
                         result = self.create_enhanced_result(
                             is_vulnerable=self._traditional_vulnerability_check(payload, response, kwargs.get('matchers')),
                             description=f"Batch {batch_idx+1}: Payload '{payload[:30]}...' in '{param_name}'",
@@ -604,44 +572,30 @@ class FlowFuzzerModule(FuzzingModule):
                             results.append(result)
                             colored_print(f"      [!] Vulnerability found: {result.description}", "vulnerability")
                         
-                        # Continue flow after injection: extract state and run remaining steps
                         test_state.extract_and_update(response, step_config.get('extract', {}))
                         
-                        # Restore the fuzzing payload if it was overwritten during extraction
                         if param_name in test_state._state and test_state._state[param_name] != payload:
                             test_state.set(param_name, payload)
                         
                         test_state.clear_request_scoped_vars()
                         
-                        # Run remaining steps (current_step_index + 1 onwards)
                         if current_step_index + 1 < len(flow_steps):
-                            remaining_results = self._run_complete_flow(
+                            remaining_results = await self._run_complete_flow(
                                 test_state, flow_steps, current_step_index + 1, 
                                 payload, param_name, stop_on_failure, **kwargs
                             )
-                            results.extend(remaining_results)
+                            # results.extend(remaining_results)
                             
                     except Exception as e:
                         colored_print(format_log_prefix("ERROR", f"Error in batch fuzzing: {str(e)}"), "error")
                         
         return results
 
-    def _execute_clean_flow_steps(self, state: StateManager, flow_steps: List[dict], 
+    async def _execute_clean_flow_steps(self, state: StateManager, flow_steps: List[dict], 
                                 start_index: int, end_index: int, 
                                 requests_dir: str, target: str) -> bool:
         """
-        Executes a range of flow steps without fuzzing, purely to build up state.
-        
-        Args:
-            state: The StateManager to update (modified in-place)
-            flow_steps: List of all steps
-            start_index: Inclusive start index
-            end_index: Exclusive end index
-            requests_dir: Directory for request files
-            target: Target URL base
-            
-        Returns:
-            bool: True if all steps succeeded, False otherwise
+        Executes a range of flow steps without fuzzing (Async).
         """
         for i in range(start_index, end_index):
             step = flow_steps[i]
@@ -651,24 +605,17 @@ class FlowFuzzerModule(FuzzingModule):
             step_name = step.get('name', f"Step {i}")
             
             try:
-                # Load request
                 parsed_request = self.runner.load_request_from_file(
                     step['request'], target, requests_dir
                 )
                 
-                # Prepare request (no payload injection here, just normal flow)
                 final_request = self.runner.prepare_request(
                     parsed_request, state, step.get('set_headers', {})
                 )
                 
-                # Execute
-                response = self.runner.run(final_request)
+                # Async execution
+                response = await self.runner.arun(final_request)
                 
-                # Check for failure (simple check: 4xx or 5xx might indicate broken setup)
-                # But sometimes 4xx is expected? For setup, we generally expect success (2xx/3xx)
-                # We'll validte based on if we can extract what we need.
-                
-                # Extract variables
                 state.extract_and_update(response, step.get('extract', {}))
                 state.clear_request_scoped_vars()
                 
@@ -678,10 +625,5 @@ class FlowFuzzerModule(FuzzingModule):
                 
         return True
 
-    async def arun(self, parsed_request: dict, step_config: dict, **kwargs) -> List[FuzzingResult]:
-        """
-        Async wrapper for the run method.
-        """
-        return self.run(parsed_request, step_config, **kwargs)
     
  

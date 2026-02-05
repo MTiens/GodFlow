@@ -210,17 +210,34 @@ def main():
                 pass
 
     # Validate proxy configuration
+    import config
+    
     proxy_config = None
-    if args.proxy:
+    proxy_url = args.proxy
+    proxy_auth = args.proxy_auth
+    # CLI arg is "no_verify_ssl" (True means disable), Config is "VERIFY_SSL" (True means enable)
+    # If generic default is True (Verify), no-verify makes it False.
+    # We start with default from config if not specified? 
+    # Actually args.no_verify_ssl is False by default.
+    verify_ssl = config.VERIFY_SSL if not args.no_verify_ssl else False
+    
+    # If no proxy arg, check global config
+    if not proxy_url and config.USE_PROXY:
+        # Pick a default proxy URL from the config dict (httpx usually allows specific dicts, 
+        # but our Runner expects a single 'url' in proxy_config to map to both)
+        # We'll default to the http one for the general 'url' field
+        proxy_url = config.HTTP_PROXIES.get("http://") or config.HTTP_PROXIES.get("https://")
+        
+    if proxy_url:
         proxy_config = {
-            'url': args.proxy,
-            'auth': args.proxy_auth,
-            'verify_ssl': not args.no_verify_ssl
+            'url': proxy_url,
+            'auth': proxy_auth,
+            'verify_ssl': verify_ssl
         }
         
         # Validate proxy URL format
-        if not args.proxy.startswith(('http://', 'https://')):
-            print(f"Error: Proxy URL must start with 'http://' or 'https://': {args.proxy}")
+        if not proxy_url.startswith(('http://', 'https://')):
+            print(f"Error: Proxy URL must start with 'http://' or 'https://': {proxy_url}")
             return
 
     # Determine output file name if needed

@@ -120,7 +120,9 @@ class Orchestrator:
         self.flow_name = extract_flow_name(self.flow_file_path)
 
         # Merge persona data with initial state if specified
+        self.active_persona_name = None
         if persona and persona in self.personas:
+            self.active_persona_name = persona
             persona_data = self.personas[persona]
             # Substitute placeholders in persona data using the resolved state
             resolved_persona = substitute_all(persona_data, self.initial_state)
@@ -132,6 +134,7 @@ class Orchestrator:
         elif self.personas:
             # Use the first persona if none specified
             first_persona_name = list(self.personas.keys())[0]
+            self.active_persona_name = first_persona_name
             persona_data = self.personas[first_persona_name]
             # Substitute placeholders in persona data using the resolved state
             resolved_persona = substitute_all(persona_data, self.initial_state)
@@ -280,7 +283,8 @@ class Orchestrator:
                     'debug': self.debug,
                     'state_factory': self._arun_flow_until,
                     'all_personas': self.personas,
-                    'initial_state': self.initial_state
+                    'initial_state': self.initial_state,
+                    'active_persona_name': self.active_persona_name
                 }
 
                 # Initialize module with None state manager initially
