@@ -28,6 +28,35 @@ class StateManager:
         """Set a variable's value."""
         self._state[key] = value
 
+    def update_from_dict(self, values: Dict[str, Any]):
+        """
+        Updates the state with a dictionary of values.
+        Supports variable substitution for string values.
+        """
+        if not values:
+            return
+
+        for key, value in values.items():
+            if isinstance(value, str):
+                # Substitute variables in the value before setting
+                resolved_value = self.substitute(value)
+                
+                if not resolved_value:
+                    print(format_log_prefix("WARN", f"Variable '{key}' assigned empty value"))
+                elif "{{" in resolved_value and "}}" in resolved_value:
+                     error_msg = f"Variable '{key}' contains unresolved placeholders: {resolved_value}"
+                     print(format_log_prefix("ERROR", error_msg))
+                     raise ValueError(error_msg)
+
+                self.set(key, resolved_value)
+                if self.debug:
+                    colored_print(format_log_prefix("STATE", f"Assigned '{key}' = '{resolved_value}'"), "state")
+            else:
+                self.set(key, value)
+                if self.debug:
+                    colored_print(format_log_prefix("STATE", f"Assigned '{key}' = '{value}'"), "state")
+
+
     def extract_and_update(self, response: httpx.Response, extract_rules: Dict):
         """Extracts values from a response and updates the state."""
         for var_name, rule in extract_rules.items():

@@ -348,6 +348,12 @@ class Orchestrator:
         parser = RequestParser(raw_request, step_target)
         parsed_request = parser.parse()
 
+        # Handle 'assign' block: update state BEFORE request preparation
+        if 'assign' in step and isinstance(step['assign'], dict):
+            if self.verbose:
+                print(f"  {color_formatter.step('Processing assignments...')}")
+            state_manager.update_from_dict(step['assign'])
+
         final_request = self.runner.prepare_request(
             parsed_request, state_manager, step.get('set_headers', {})
         )

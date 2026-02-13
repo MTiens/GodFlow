@@ -20,7 +20,7 @@ class HTTPVerbTamperModule(FuzzingModule):
         "X-MS-ENUMATTS"
     ]
 
-    def run(self, parsed_request, step_config):
+    def run(self, parsed_request, step_config, **kwargs):
         results = []
         original_method = parsed_request['method']
         status_verb_map = {}  # Map status codes to lists of verbs
@@ -31,6 +31,15 @@ class HTTPVerbTamperModule(FuzzingModule):
 
             fuzzed_request = parsed_request.copy()
             fuzzed_request['method'] = verb
+
+            # Process assign block if present, updating the state for this request temporarily
+            # Note: Since we reuse state_manager across verbs for the same step, 
+            # and update_from_dict modifies it in place, this is fine as long as 
+            # the assigned values are constant or we don't need to revert them.
+            # However, for safety in fuzzing loops, we might want to clone state, 
+            # but http_verb_tamper doesn't clone state per verb currently (it uses self.state_manager).
+            # Given the simple nature of this module, direct update is consistent with current design.
+            self._process_assign(step_config, self.state_manager)
 
             final_request = self.runner.prepare_request(
                 fuzzed_request, self.state_manager, step_config.get('set_headers', {})

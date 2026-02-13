@@ -24,8 +24,8 @@ USE_PROXY = True
 
 # The proxy URLs to use if USE_PROXY is True.
 HTTP_PROXIES = {
-    "http://": "http://127.0.0.1:8082",
-    "https://": "http://127.0.0.1:8082",
+    "http://": "http://127.0.0.1:8080",
+    "https://": "http://127.0.0.1:8080",
 }
 
 # --- Concurrency Settings ---

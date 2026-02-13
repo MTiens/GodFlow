@@ -207,6 +207,8 @@ class FlowFuzzerModule(FuzzingModule):
                 fuzz_state.set(param_name, payload)
                 
                 # Prepare and execute the request
+                self._process_assign(step_config, fuzz_state)
+
                 final_request = self.runner.prepare_request(
                     parsed_request, fuzz_state, step_config.get('set_headers', {})
                 )
@@ -325,6 +327,8 @@ class FlowFuzzerModule(FuzzingModule):
                     continue
                 
                 # Prepare the final request
+                self._process_assign(step, fuzz_state)
+
                 final_request = self.runner.prepare_request(
                     parsed_request, fuzz_state, step.get('set_headers', {})
                 )
@@ -551,6 +555,8 @@ class FlowFuzzerModule(FuzzingModule):
                             step_config['request'], target, requests_dir
                         )
                         
+                        self._process_assign(step_config, test_state)
+                        
                         final_request = self.runner.prepare_request(
                             parsed_request, test_state, step_config.get('set_headers', {})
                         )
@@ -609,6 +615,8 @@ class FlowFuzzerModule(FuzzingModule):
                     step['request'], target, requests_dir
                 )
                 
+                self._process_assign(step, state)
+
                 final_request = self.runner.prepare_request(
                     parsed_request, state, step.get('set_headers', {})
                 )

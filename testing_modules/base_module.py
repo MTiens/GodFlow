@@ -119,6 +119,18 @@ class FuzzingModule(ABC):
         self.baseline_manager = None  # Will be injected by orchestrator if available
         self.baseline_collection = None  # Will be loaded if baseline comparison is enabled
 
+    def set_baseline_context(self, baseline_manager, baseline_collection):
+        """Set baseline context for enhanced vulnerability detection."""
+        self.baseline_manager = baseline_manager
+        self.baseline_collection = baseline_collection
+
+    def _process_assign(self, step_config: dict, state_manager: StateManager):
+        """
+        Process the 'assign' block in a step configuration, updating the state manager.
+        """
+        if 'assign' in step_config and isinstance(step_config['assign'], dict):
+            state_manager.update_from_dict(step_config['assign'])
+
 
     def check_custom_matchers(self, response, matchers: List[Dict[str, Any]]) -> bool:
         """

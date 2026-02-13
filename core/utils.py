@@ -171,9 +171,46 @@ class DynamicVariableResolver:
                     return subprocess.check_output(cmd, shell=True, text=True).strip()
                 except Exception as e:
                     return f"<shell-error:{e}>"
+            # Python expression: {{python: 1 + 1}}
+            elif expr.startswith("python:"):
+                code = expr.split(":", 1)[1]
+                try:
+                    # Prepare context
+                    import hashlib
+                    import json
+                    import base64
+                    import hmac
+                    import importlib
+                    
+                    context = {
+                        "state": self.state,
+                        "hashlib": hashlib,
+                        "json": json,
+                        "base64": base64,
+                        "hmac": hmac,
+                        "random": random,
+                        "time": time,
+                        "import_module": importlib.import_module,
+                        "print": print
+                    }
+                    result = eval(code, {"__builtins__": {}}, context)
+                    return str(result)
+                except Exception as e:
+                    return f"<python-error:{e}>"
+            
             # Fallback to state variable
             return str(self.state.get(expr, match.group(0)))
-        return re.sub(r"\{\{([^}]+)\}\}", replacer, text)
+        # Loop until no more substitutions are made, resolving inside-out.
+        # Regex matches {{...}} containing NO inner {{...}}
+        # This allows single { or } inside, but forces innermost resolution first.
+        inner_pattern = re.compile(r"\{\{((?:(?!\{\{).)*?)\}\}", re.DOTALL)
+        max_iterations = 10  # Safety limit to prevent infinite loops
+        for _ in range(max_iterations):
+            new_text = inner_pattern.sub(replacer, text)
+            if new_text == text:
+                break  # No more substitutions possible
+            text = new_text
+        return text
 
 def substitute_all(obj, state):
     """Recursively substitute all placeholders in a dict/list/string using DynamicVariableResolver."""
