@@ -1,7 +1,7 @@
 # core/state.py
 import time
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List, Union
 import json
 import httpx
 from core.utils import DynamicVariableResolver
@@ -43,7 +43,7 @@ class StateManager:
                 
                 if not resolved_value:
                     print(format_log_prefix("WARN", f"Variable '{key}' assigned empty value"))
-                elif "{{" in resolved_value and "}}" in resolved_value:
+                elif isinstance(resolved_value, str) and "{{" in resolved_value and "}}" in resolved_value:
                      error_msg = f"Variable '{key}' contains unresolved placeholders: {resolved_value}"
                      print(format_log_prefix("ERROR", error_msg))
                      raise ValueError(error_msg)
@@ -118,6 +118,18 @@ class StateManager:
                 else: 
                      print(format_log_prefix("WARN", f"Regex pattern '{pattern}' not found in response for variable '{var_name}'"))
 
+            if "python" in rule:
+                try:
+                    expression = rule["python"]
+                    resolver = DynamicVariableResolver(self._state)
+                    value = resolver._eval_python(expression)
+                    if value is not None:
+                        self.set(var_name, value)
+                        if self.debug:
+                            colored_print(format_log_prefix("STATE", f"Extracted python '{var_name}' = '{value}'"), "state")
+                except Exception as e:
+                    print(format_log_prefix("WARN", f"Failed to evaluate python extract for '{var_name}': {e}"))
+
     def _get_nested_value(self, data: Any, path: str) -> Any:
         """Extracts a value from nested data using dot notation with array support."""
         if not path:
@@ -153,12 +165,15 @@ class StateManager:
                     
         return current
 
-    def substitute(self, text: str) -> str:
-        """Substitutes all placeholders {{var}} in a string, supporting dynamic variables."""
-        if not text:
+    def substitute(self, text: str) -> Any:
+        """Substitutes all placeholders {{var}} in a string, ensuring we return raw objects if applicable."""
+        if not isinstance(text, str):
+            # If it's already an object, return as is (or shallow copy if needed)
             return text
+        
         resolver = DynamicVariableResolver(self._state)
-        return resolver.resolve(text)
+        # Use evaluate to potentially get a raw object back (dict, list, int, etc.)
+        return resolver.evaluate(text)
 
     def clear_request_scoped_vars(self):
         """Clears variables with 'request' scope after a request."""

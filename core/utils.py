@@ -4,6 +4,7 @@ import random
 import time
 import subprocess
 from datetime import datetime
+import json
 
 # We compile the regex pattern once for better performance, as it will be used frequently.
 # This pattern finds any word characters (letters, numbers, underscore) inside {{...}}.
@@ -89,14 +90,119 @@ class DynamicVariableResolver:
     def __init__(self, state=None):
         self.state = state or {}
 
+    def evaluate(self, text: str):
+        """
+        Evaluates a string expression to a native Python object if possible.
+        If the text is exactly '{{variable}}' or '{{python: ...}}', returns the raw value.
+        Otherwise, returns the text with substitutions as a string.
+        """
+        if not isinstance(text, str):
+            return text
+
+        # Check for exact matches first
+        # 1. Variable match: {{my_var}} or {{my_var.key}}
+        var_match = re.fullmatch(r"\{\{([\w_\.\[\]]+)\}\}", text.strip())
+        if var_match:
+            var_path = var_match.group(1)
+            # Try to resolve nested value
+            val = self._get_value_by_path(var_path)
+            if val is not None:
+                return val
+            # If not found, fall through
+
+        # 2. Python expression match: {{python: ...}}
+        python_match = re.fullmatch(r"\{\{python:(.+)\}\}", text.strip(), re.DOTALL)
+        if python_match:
+            code = python_match.group(1).strip()
+            return self._eval_python(code)
+            
+        # Fallback to string substitution
+        return self.resolve(text)
+
+    def _get_value_by_path(self, path: str):
+        """Helper to get value from state using dot notation."""
+        if path in self.state:
+            return self.state[path]
+            
+        parts = path.split('.')
+        current = self.state
+        
+        for part in parts:
+            if '[' in part and ']' in part:
+                # Handle array access like "accounts[0]"
+                key_part = part[:part.index('[')]
+                index_part = part[part.index('[')+1:part.index(']')]
+                
+                if key_part:
+                    if isinstance(current, dict) and key_part in current:
+                        current = current[key_part]
+                    else:
+                        return None
+                
+                try:
+                    index = int(index_part)
+                    if isinstance(current, list) and 0 <= index < len(current):
+                        current = current[index]
+                    else:
+                        return None
+                except (ValueError, TypeError):
+                    return None
+            else:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    return None
+        return current
+
+    def _eval_python(self, code: str):
+        try:
+            # Prepare context
+            import hashlib
+            import json
+            import base64
+            import hmac
+            import importlib
+            import os
+            import sys
+            
+            # Helper to load a module from a path
+            def load_module(path: str):
+                module_name = os.path.basename(path).replace('.py', '')
+                spec = importlib.util.spec_from_file_location(module_name, path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+                    return module
+                raise ImportError(f"Could not load module at {path}")
+
+            context = {
+                "state": self.state,
+                "hashlib": hashlib,
+                "json": json,
+                "base64": base64,
+                "hmac": hmac,
+                "random": random,
+                "time": time,
+                "import_module": importlib.import_module,
+                "load_module": load_module,
+                "print": print,
+                "os": os
+            }
+            return eval(code, {"__builtins__": {}}, context)
+        except Exception as e:
+            return f"<python-error:{e}>"
+
     def resolve(self, text: str) -> str:
         def replacer(match):
             expr = match.group(1).strip()
             
             # Check state first before falling back to dynamic functions
-            # print(f"[DEBUG-DynamicVariableResolver] state: {self.state}")
-            if expr in self.state:
-                return str(self.state[expr])
+            val = self._get_value_by_path(expr)
+            if val is not None:
+                if isinstance(val, (dict, list)):
+                    return json.dumps(val)
+                return str(val)
             
             # Handle function calls like {{util.randomNumbers(4)}} or {{util.randomChars(16, hex)}}
             if expr.startswith("util."):
@@ -174,32 +280,17 @@ class DynamicVariableResolver:
             # Python expression: {{python: 1 + 1}}
             elif expr.startswith("python:"):
                 code = expr.split(":", 1)[1]
-                try:
-                    # Prepare context
-                    import hashlib
-                    import json
-                    import base64
-                    import hmac
-                    import importlib
-                    
-                    context = {
-                        "state": self.state,
-                        "hashlib": hashlib,
-                        "json": json,
-                        "base64": base64,
-                        "hmac": hmac,
-                        "random": random,
-                        "time": time,
-                        "import_module": importlib.import_module,
-                        "print": print
-                    }
-                    result = eval(code, {"__builtins__": {}}, context)
-                    return str(result)
-                except Exception as e:
-                    return f"<python-error:{e}>"
+                return str(self._eval_python(code))
             
             # Fallback to state variable
-            return str(self.state.get(expr, match.group(0)))
+            val = self.state.get(expr)
+            if val is not None:
+                if isinstance(val, (dict, list)):
+                    return json.dumps(val)
+                return str(val)
+            
+            return match.group(0)
+
         # Loop until no more substitutions are made, resolving inside-out.
         # Regex matches {{...}} containing NO inner {{...}}
         # This allows single { or } inside, but forces innermost resolution first.
@@ -211,7 +302,6 @@ class DynamicVariableResolver:
                 break  # No more substitutions possible
             text = new_text
         return text
-
 def substitute_all(obj, state):
     """Recursively substitute all placeholders in a dict/list/string using DynamicVariableResolver."""
     resolver = DynamicVariableResolver(state)
